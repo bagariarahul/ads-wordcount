@@ -1,0 +1,106 @@
+% ===================== Phase 2: Implementation and evaluation =====================
+% Every \textbf{[...]} is a placeholder for a number from YOUR runs (README, "Phase 2
+% experiment"). Sandbox numbers from development are not valid report data.
+% Figures and the latency table are produced by bench.plot; copy them into figures/.
+\section{Phase 2: Implementation and Latency Evaluation}\label{sec:impl}
+
+\subsection{Implementation}
+Each component of Fig.~\ref{fig:arch} runs in its own container, defined in one
+Compose file (versions and settings in Table~\ref{tab:setup}); the server is
+limited to one CPU so that results do not depend on the host's core count. Each
+text is tokenized once at startup with the word rule of FR1. A cache miss scans
+the text's word sequence; we deliberately keep no precomputed word index, which
+would leave the cache nothing to save. Requests are fully validated before Redis
+is touched, so malformed requests never count as hot keywords; if Redis is down,
+the server answers without it (fail-open). Every request opens a new connection,
+because the Phase~3 load balancer forwards byte streams and can only choose a
+server when a connection opens. Tracing the protocol messages shows the price:
+besides the TCP handshake, a count takes four RPyC round trips (\textsc{getroot},
+\textsc{inspect}, \textsc{getattr}, \textsc{call}) before the reply arrives,
+where a reused connection needs two.
+
+\subsection{Experiments}
+Latency is measured at the client, from opening the connection (part of sending
+the request) to receiving the reply. A seeded trace of 10{,}000 requests
+(Table~\ref{tab:setup}) is replayed \emph{open-loop}: requests leave at their
+scheduled times whether or not earlier replies have arrived, so the generator
+cannot slow down with the server and hide queueing. Every run replays the same
+trace from an empty cache, with inter-arrival gaps scaled to the rate, so only the
+load differs between rates. Replies are checked against independently computed
+counts, and a run is discarded if the generator lags its schedule (99th-percentile
+send lag above 10\,ms). Rates were chosen after a calibration sweep, up to just
+below the saturation point of one server (\textbf{[Rsat]}\,req/s).
+
+\begin{table}[t]
+\caption{Phase 2 experiment setup}
+\label{tab:setup}
+\centering
+\footnotesize
+\begin{tabular}{@{}p{0.27\columnwidth}p{0.67\columnwidth}@{}}
+\hline
+Host & \textbf{[CPU model, cores, RAM, OS]}; Docker \textbf{[version]}, \textbf{[n]} CPUs and \textbf{[m]}\,GB available to Docker \\
+Software & Python 3.12, RPyC 6.0.2, redis-py 8.1.0; Redis 7.4, in-memory only, 256\,MB, LRU eviction \\
+Containers & server: 1 CPU; Redis and client: no limit \\
+Corpus & 8 Project Gutenberg books, licence text removed; \textbf{[N]} words \\
+Trace & 10{,}000 requests, seed 42 \\
+Texts & uniform over the 8 books \\
+Keywords & pool of 1{,}000 words (corpus frequency ranks 100--5{,}099), Zipf popularity ($s=1.0$); best possible hit ratio \textbf{[X]}\% \\
+Arrivals & Poisson, open loop; same trace at every rate \\
+Rates & \textbf{[R1, R2, R3, R4, R5]} requests/s \\
+Runs & 3 per rate, each from an empty cache \\
+Metrics & mean and 99th-percentile latency (linear interpolation between ranks) \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Results}
+Figs.~\ref{fig:mean} and~\ref{fig:p99} show the mean and the 99th-percentile
+latency per rate; Table~\ref{tab:latency} lists the values. All
+\textbf{[150{,}000]} requests were answered correctly and without errors, and
+the hit ratio was \textbf{[X]}\% at every rate.
+% TODO after the runs: replace every bracketed value and keep only the statements
+% your figures support. The reasoning below is the expected explanation; check it.
+At the lowest rate the mean latency is \textbf{[x]}\,ms. Most of it is a fixed
+per-request cost, connection setup plus four RPyC round trips, which no cache hit
+removes; a miss adds the scan of the requested text, longest for the largest book.
+Up to \textbf{[R]}\,req/s the mean stays almost flat, while the 99th percentile
+grows from \textbf{[a]} to \textbf{[b]}\,ms. The tail rises first because bursts
+of arrivals queue behind slow requests: the server's CPU work is serialized, since
+it has one CPU and Python's global interpreter lock runs one request thread at a
+time. For such a single-server queue the mean waiting time grows with
+$\lambda E[S^2]/(1-\rho)$ (Pollaczek--Khinchine~\cite{kleinrock1975queueing}),
+where $\lambda$ is the arrival rate, $S$ the service time and $\rho$ the
+utilization. Mixing fast hits with slow misses makes $E[S^2]$ large, so waiting
+time, and the tail most of all~\cite{dean2013tail}, grows well before the server
+is fully utilized. At \textbf{[R5]}\,req/s the 99th percentile reaches
+\textbf{[c]}\,ms and violates NFR1: one server does not scale, which motivates
+replicating it behind a load balancer (Phase~3).
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/latency_mean.pdf}{%
+  \includegraphics[width=\columnwidth]{figures/latency_mean}}{%
+  \fbox{\parbox[c][1.9in][c]{0.95\columnwidth}{\centering Run \texttt{bench.plot},
+  then copy \texttt{latency\_mean.pdf} into \texttt{figures/}.}}}
+\caption{Mean latency per request rate, one server (mean of 3 runs; whiskers: min--max).}
+\label{fig:mean}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/latency_p99.pdf}{%
+  \includegraphics[width=\columnwidth]{figures/latency_p99}}{%
+  \fbox{\parbox[c][1.9in][c]{0.95\columnwidth}{\centering Run \texttt{bench.plot},
+  then copy \texttt{latency\_p99.pdf} into \texttt{figures/}.}}}
+\caption{99th-percentile (tail) latency per request rate, one server (mean of 3 runs; whiskers: min--max).}
+\label{fig:p99}
+\end{figure}
+
+\begin{table}[t]
+\caption{Latency per request rate, one server (ms; mean of 3 runs)}
+\label{tab:latency}
+\centering
+\footnotesize
+\IfFileExists{figures/latency_table.tex}{\input{figures/latency_table.tex}}{%
+  \fbox{Run \texttt{bench.plot}, then copy \texttt{latency\_table.tex} into \texttt{figures/}.}}
+\end{table}

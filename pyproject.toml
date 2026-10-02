@@ -1,0 +1,13 @@
+# Tool configuration only; this project is not packaged for PyPI.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, simplify
+select = ["E", "F", "I", "B", "UP", "SIM"]

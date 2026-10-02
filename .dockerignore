@@ -1,0 +1,13 @@
+# Keep the build context small: data and outputs are mounted at run time, never baked in.
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.venv
+corpus
+traces
+results
+report
+*.zip

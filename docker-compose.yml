@@ -1,0 +1,82 @@
+# Phase 2: one word count server, one Redis cache, and a client container for experiments.
+#
+#   docker compose build
+#   docker compose up -d redis server1           # start the service
+#   docker compose run --rm client <command>     # tests, trace, load generator, plots
+#   docker compose logs -f server1                # per-request log lines
+#   docker compose down                           # stop everything
+#
+# Phase 3 adds server2 and server3 (one `<<: *server` block each) plus the load
+# balancer. Do NOT use `deploy.replicas`: the assignment forbids Compose's built-in
+# replication (random container names, built-in load balancing).
+
+name: ads-wordcount
+
+# Settings shared by every server replica (YAML anchor, merged in below with `<<:`),
+# so replicas cannot drift apart and adding one is a few lines.
+x-server: &server
+  build:
+    context: .
+    target: runtime
+  image: ads-wordcount:runtime
+  volumes:
+    - ./corpus:/data/corpus:ro # the texts; read-only for the service
+  # Fixed CPU budget per replica: results do not depend on how many cores the host
+  # has, and Phase 3 (3 x 1 CPU) compares fairly with Phase 2 (1 x 1 CPU).
+  cpus: 1.0
+  depends_on:
+    redis:
+      condition: service_healthy
+  # Healthy = corpus loaded and port open. Shown as (healthy) in `docker ps`; the
+  # client waits for it. No retries needed for the client after this.
+  healthcheck:
+    test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 18861), 2).close()"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+    start_period: 60s
+
+x-server-env: &server-env
+  WC_CORPUS_DIR: /data/corpus
+  WC_REDIS_HOST: redis
+  WC_PORT: "18861"
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    # A pure in-memory cache: no snapshots (--save ""), no append-only file, and a
+    # memory bound with least-recently-used eviction (cached counts have no TTL).
+    command:
+      ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  server1:
+    <<: *server
+    container_name: server1
+    hostname: server1 # becomes the server ID (wordcount/config.py) shown in replies and logs
+    environment:
+      <<: *server-env
+
+  client:
+    build:
+      context: .
+      target: dev
+    image: ads-wordcount:dev
+    profiles: ["tools"] # not started by `up`; use `docker compose run --rm client ...`
+    environment:
+      WC_HOST: server1 # Phase 3: the load balancer
+      WC_PORT: "18861"
+      WC_CORPUS_DIR: /data/corpus
+      WC_REDIS_HOST: redis # benchmark harness only: clears the cache before each run
+    volumes:
+      - ./corpus:/data/corpus:ro
+      - ./traces:/app/traces
+      - ./results:/app/results
+    depends_on:
+      server1:
+        condition: service_healthy

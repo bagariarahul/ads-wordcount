@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+*.zip
+
+# The corpus is downloaded by scripts/fetch_corpus.py; not committed.
+corpus/*.txt
+# Per-request CSVs are large; the .summary.json files and figures are committed.
+results/**/*.csv
+
+# LaTeX build artefacts
+report/**/*.aux
+report/**/*.log
+report/**/*.out
+report/**/*.bbl
+report/**/*.blg

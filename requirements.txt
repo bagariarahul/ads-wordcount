@@ -1,0 +1,4 @@
+# Runtime dependencies of the service (server and client). Pinned: the versions the
+# code and tests were verified with, so every teammate and container runs the same stack.
+rpyc==6.0.2
+redis==8.1.0

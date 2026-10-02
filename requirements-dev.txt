@@ -1,0 +1,6 @@
+# Benchmark harness, plots and tests (the "dev" image target). Runtime deps come from requirements.txt.
+matplotlib==3.11.2
+numpy==2.4.4
+pytest==9.1.1
+fakeredis==2.38.0
+ruff==0.16.9
