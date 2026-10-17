@@ -1,0 +1,36 @@
+# docker compose up -d --build
+# docker exec client python -m wordcount.client moby_dick whale
+# docker compose logs -f server1
+#
+# init: true makes docker stop stop a container at once (python as process 1 ignores SIGTERM).
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+
+  server1:
+    build: .
+    container_name: server1
+    command: python -m wordcount.server
+    init: true
+    environment:
+      SERVER_ID: server1
+    volumes:
+      - ./corpus:/data/corpus:ro
+    depends_on:
+      - redis
+
+  # the client only waits; commands are run in it with docker exec
+  client:
+    build: .
+    container_name: client
+    command: sleep infinity
+    init: true
+    environment:
+      HOST: server1
+    volumes:
+      - ./corpus:/data/corpus:ro
+      - ./results:/app/results
+    depends_on:
+      - server1

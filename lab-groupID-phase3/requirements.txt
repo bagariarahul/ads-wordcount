@@ -1,0 +1,6 @@
+rpyc==6.0.2
+redis==8.1.0
+numpy==2.4.4
+matplotlib==3.11.2
+pytest==9.1.1
+fakeredis==2.38.0

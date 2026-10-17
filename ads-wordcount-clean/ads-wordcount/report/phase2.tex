@@ -1,0 +1,100 @@
+\section{Phase 2: Implementation and Latency Evaluation}\label{sec:impl}
+
+\subsection{Implementation}
+Each component of Fig.~\ref{fig:arch} runs in its own container, defined in one
+Compose file: Redis, the server and a client container from which we run the
+command-line client, the load generator and the tests. The server and client
+images are built from one Dockerfile based on \texttt{python:3.12-slim}; the
+\texttt{python:3.9-slim-buster} image from the assignment no longer builds because
+Debian Buster is end-of-life. The corpus consists of eight books from Project
+Gutenberg (\textbf{[N]} words). The server splits every text into lowercase words
+once at startup; a cache miss counts the keyword in that word list. Every request
+uses a new connection, because the load balancer of Phase~3 can only choose a
+server when a connection is opened.
+
+\subsection{Experiments}
+Latency is measured at the client, from opening the connection to receiving the
+reply. The load generator sends a fixed list of 5{,}000 random requests (random
+text, random keyword from the 500 most common words of a book without the 50 most
+common ones, fixed seed) at a fixed rate. Each request is sent from its own thread
+at its scheduled time, whether or not earlier replies have arrived, so slow replies
+do not lower the request rate. We used the rates \textbf{[R1--R5]}\,req/s and ran
+each rate three times. Redis is emptied before every run, so every run starts with
+an empty cache and sees the same sequence of hits and misses.
+
+\begin{table}[t]
+\caption{Phase 2 experiment setup}
+\label{tab:setup}
+\centering
+\footnotesize
+\begin{tabular}{@{}p{0.25\columnwidth}p{0.69\columnwidth}@{}}
+\hline
+Host & \textbf{[CPU, cores, RAM, OS]}; Docker \textbf{[version]} \\
+Software & Python 3.12, RPyC 6.0.2, redis-py 8.1.0, Redis 7.4 \\
+Corpus & 8 Project Gutenberg books, \textbf{[N]} words \\
+Requests & 5{,}000 per run, random text and keyword, fixed seed \\
+Rates & \textbf{[R1, R2, R3, R4, R5]} requests/s \\
+Runs & 3 per rate, each with an empty cache \\
+Metrics & mean and 99th-percentile latency \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Results}
+Fig.~\ref{fig:shot-p2} shows that the server answers requests and uses the cache.
+Figs.~\ref{fig:mean} and~\ref{fig:p99} show the mean and the 99th-percentile
+latency per rate (average of three runs); Table~\ref{tab:latency} lists the values.
+\textbf{[All requests were answered without errors.]}
+% TODO after the runs: replace the bracketed values and keep only what your figures show.
+At the lowest rate the mean latency is \textbf{[x]}\,ms. Most of it is a fixed
+cost per request: opening a TCP connection and setting up the RPyC connection,
+which a cache hit does not remove; a miss also counts the word in the text, which
+takes longest for the largest book. Up to \textbf{[R]}\,req/s the mean stays almost
+flat, while the 99th percentile grows from \textbf{[a]} to \textbf{[b]}\,ms. The
+tail grows first because requests that arrive close together have to wait for
+each other: the server handles them in threads, but Python runs only one thread at
+a time, so the work is done one request after another. Mixing fast cache hits with
+slow misses makes these waiting times uneven, so the tail grows well before the
+server is fully busy~\cite{dean2013tail}. At \textbf{[R5]}\,req/s the 99th
+percentile reaches \textbf{[c]}\,ms: one server does not scale, which motivates
+replicating it behind a load balancer (Phase~3).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/screenshot_phase2}
+\caption{The client asks for the same keyword twice (first a cache miss, then a cache
+hit) and for the hot keywords; below, the matching lines of the server log.}
+\label{fig:shot-p2}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/phase2_mean}
+\caption{Average latency per request rate, one server (average of 3 runs).}
+\label{fig:mean}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/phase2_p99}
+\caption{99th-percentile (tail) latency per request rate, one server (average of 3 runs).}
+\label{fig:p99}
+\end{figure}
+
+\begin{table}[t]
+\caption{Latency per request rate, one server (ms, average of 3 runs)}
+\label{tab:latency}
+\centering
+\footnotesize
+\begin{tabular}{rrr}
+\hline
+Rate (req/s) & Mean & p99 \\
+\hline
+\textbf{[R1]} & & \\
+\textbf{[R2]} & & \\
+\textbf{[R3]} & & \\
+\textbf{[R4]} & & \\
+\textbf{[R5]} & & \\
+\hline
+\end{tabular}
+\end{table}
